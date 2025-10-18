@@ -5,7 +5,6 @@ import os
 import json
 import traceback
 import time
-from playwright.sync_api import sync_playwright
 
 # --- CONFIGURATION ---
 STATE_FILE = "seen_jobs.json"
@@ -13,7 +12,7 @@ REQUEST_TIMEOUT = 15
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
 
 # --- MODEL 4: THE AI FILTER ---
-def is_job_relevant(title): # No longer needs description
+def is_job_relevant(title):
     """Uses the Gemini AI to check if a job is relevant based on title."""
     try:
         api_key = os.environ["GEMINI_API_KEY"]
@@ -21,7 +20,7 @@ def is_job_relevant(title): # No longer needs description
         model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""
-        You are a research assistant/Master's student in robotics.
+        You are a research assistant for a student in robotics.
         My specific interests are: "Reinforcement Learning", "RL", and "Robotics".
         
         Based *only* on the job title, is this job relevant to these *specific* interests?
@@ -44,7 +43,9 @@ def is_job_relevant(title): # No longer needs description
     except Exception as e:
         print(f"Error checking AI: {e}")
         return False
-    
+
+# --- MODEL 3: THE SCRAPERS (ALL SIMPLE REQUESTS) ---
+
 def scrape_eth_zurich():
     """Scrapes job postings from ETH Zurich."""
     url = "https://jobs.ethz.ch/site/index?text=&group=2&group=3"
@@ -90,15 +91,16 @@ def scrape_cambridge():
     return found_jobs
 
 def scrape_ucl():
-    """Scrapes research jobs from UCL London."""
-    url = "https://www.ucl.ac.uk/work-at-ucl/search-jobs/keyword/research?s=,"
+    """Scrapes research jobs from UCL London. (FIXED)"""
+    url = "https://www.ucl.ac.uk/work-at-ucl/search-jobs?collection=job-opportunities-beta&query=research&profile=job-opportunities-beta&sort=advertdatestring"
     print(f"Scraping UCL London...")
     found_jobs = []
     try:
         response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        job_cards = soup.find_all('div', class_='card--job')
+        # Corrected selector
+        job_cards = soup.find_all('div', class_='sf-search-result__content')
         for card in job_cards:
             h3_elem = card.find('h3')
             if h3_elem:
@@ -106,7 +108,7 @@ def scrape_ucl():
                 if title_element:
                     title = title_element.text.strip()
                     href = title_element.get('href')
-                    full_link = f"https://www.ucl.ac.uk{href}" if href.startswith('/') else href
+                    full_link = href # UCL uses absolute links
                     found_jobs.append({'title': title, 'link': full_link, 'source': 'UCL'})
     except Exception as e:
         print(f"Error scraping UCL: {e}")
@@ -159,105 +161,73 @@ def scrape_max_planck():
     return found_jobs
 
 def scrape_mila():
-    """Scrapes jobs from Mila."""
-    url = "https://mila.quebec/en/jobs-at-mila/"
+    """Scrapes jobs from Mila. (FIXED)"""
+    url = "https://mila.quebec/en/careers/" # Corrected URL
     print(f"Scraping Mila...")
     found_jobs = []
     try:
         response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        job_items = soup.find_all('div', class_='job-list-item')
+        # Corrected selector
+        job_items = soup.find_all('div', class_='career-card')
         for item in job_items:
-            h4_elem = item.find('h4')
-            if h4_elem:
-                title_element = h4_elem.find('a')
-                if title_element:
-                    title = title_element.text.strip()
-                    href = title_element.get('href')
+            h3_elem = item.find('h3')
+            if h3_elem:
+                title = h3_elem.text.strip()
+                href_elem = item.find('a')
+                if href_elem:
+                    href = href_elem.get('href')
                     found_jobs.append({'title': title, 'link': href, 'source': 'Mila'})
     except Exception as e:
         print(f"Error scraping Mila: {e}")
     return found_jobs
 
 def scrape_vector_institute():
-    """Scrapes careers from Vector Institute."""
-    url = "https://vectorinstitute.ai/careers/"
+    """Scrapes careers from Vector Institute. (FIXED)"""
+    url = "https://vectorinstitute.ai/job-board/" # Corrected URL
     print(f"Scraping Vector Institute...")
     found_jobs = []
     try:
         response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        job_items = soup.find_all('div', class_='post-summary')
+        # Corrected selector
+        job_items = soup.find_all('div', class_='job-board-card')
         for item in job_items:
-            h3_elem = item.find('h3', class_='post-summary__title')
+            h3_elem = item.find('h3')
             if h3_elem:
-                title_element = h3_elem.find('a')
-                if title_element:
-                    title = title_element.text.strip()
-                    href = title_element.get('href')
+                title = h3_elem.text.strip()
+                href_elem = item.find('a')
+                if href_elem:
+                    href = href_elem.get('href')
                     found_jobs.append({'title': title, 'link': href, 'source': 'Vector Institute'})
     except Exception as e:
         print(f"Error scraping Vector Institute: {e}")
     return found_jobs
 
 def scrape_uc_berkeley():
-    url = "https://careers.ucop.edu/jobs/search?job_categories=research-and-development&location_global=Berkeley%2C+CA"
-    print(f"Scraping UC Berkeley (Dynamic)...")
+    """Scrapes UC Berkeley. (FIXED - Now a simple scraper)"""
+    url = "https://bcal.berkeley.edu/jobs" # Corrected URL
+    print(f"Scraping UC Berkeley...")
     found_jobs = []
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url, timeout=60000)
-            page.wait_for_selector('ul.jobs-list', timeout=30000)
-            
-            html = page.content()
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            job_items = soup.find_all('li', class_='jobs-list-item')
-            for item in job_items:
-                title_element = item.find('h3', class_='job-title')
-                if title_element:
-                    title = title_element.text.strip()
-                    href_element = title_element.find('a')
-                    if href_element:
-                        href = href_element.get('href')
-                        full_link = f"https://careers.ucop.edu{href}" if href.startswith('/') else href
-                        found_jobs.append({'title': title, 'link': full_link, 'source': 'UC Berkeley'})
-            browser.close()
-    except Exception as e:
-        print(f"Error scraping UC Berkeley: {e}\n{traceback.format_exc()}")
-    return found_jobs
-
-def scrape_toronto():
-    url = "https://jobs.utoronto.ca/search/?q=&sort=postedDate&optionsFacetsDD_department=&optionsFacetsDD_campus=St.+George+(downtown+Toronto)&optionsFacetsDD_jobFamily=Research+Services"
-    print(f"Scraping UofT (Dynamic)...")
-    found_jobs = []
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url, timeout=60000)
-            
-            page.wait_for_selector('div.jobs-list-item', timeout=30000)
-            time.sleep(5)
-            
-            html = page.content()
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            job_items = soup.find_all('div', class_='jobs-list-item')
-            for item in job_items:
-                title_element = item.find('a', class_='job-title-link')
+        response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        # Corrected selector
+        job_items = soup.find_all('div', class_='views-row')
+        for item in job_items:
+            h3_elem = item.find('h3', class_='job-title')
+            if h3_elem:
+                title_element = h3_elem.find('a')
                 if title_element:
                     title = title_element.text.strip()
                     href = title_element.get('href')
-                    full_link = f"https://jobs.utoronto.ca{href}" if href.startswith('/') else href
-                    found_jobs.append({'title': title, 'link': full_link, 'source': 'UofT'})
-            browser.close()
+                    full_link = f"https://bcal.berkeley.edu{href}" if href.startswith('/') else href
+                    found_jobs.append({'title': title, 'link': full_link, 'source': 'UC Berkeley'})
     except Exception as e:
-        print(f"Error scraping UofT: {e}\n{traceback.format_exc()}")
+        print(f"Error scraping UC Berkeley: {e}")
     return found_jobs
 
 # --- STATE MANAGEMENT ---
@@ -272,6 +242,7 @@ def save_seen_jobs(seen_jobs):
     with open(STATE_FILE, 'w') as f:
         json.dump(list(seen_jobs), f, indent=2)
 
+# --- MAIN SCRIPT LOGIC ---
 def main():
     seen_jobs = load_seen_jobs()
     all_current_jobs = []
@@ -280,7 +251,7 @@ def main():
     print("--- STARTING JOB SCRAPING ---")
     print("=" * 60)
     
-    print("\n[1/2] Running simple (requests-based) scrapers...")
+    # Run all scrapers (UofT removed, Berkeley moved)
     all_current_jobs.extend(scrape_eth_zurich())
     all_current_jobs.extend(scrape_cambridge())
     all_current_jobs.extend(scrape_ucl())
@@ -288,16 +259,14 @@ def main():
     all_current_jobs.extend(scrape_max_planck())
     all_current_jobs.extend(scrape_mila())
     all_current_jobs.extend(scrape_vector_institute())
-    
-    print("\n[2/2] Running dynamic (Playwright-based) scrapers...")
     all_current_jobs.extend(scrape_uc_berkeley())
-    all_current_jobs.extend(scrape_toronto())
     
     print(f"\nFound {len(all_current_jobs)} jobs total across all sites")
     
     new_relevant_jobs = []
     newly_seen_links = []
     
+    # Filter for new and relevant jobs
     print("\n--- FILTERING JOBS ---")
     for idx, job in enumerate(all_current_jobs, 1):
         if job['link'] not in seen_jobs:
@@ -308,7 +277,7 @@ def main():
                 
             newly_seen_links.append(job['link'])
             
-    # 4. Prepare email output
+    # Prepare email output
     print("\n" + "=" * 60)
     email_body = ""
     if new_relevant_jobs:
@@ -320,6 +289,7 @@ def main():
     else:
         print("No new relevant jobs found.")
         
+    # Save output for GitHub Action
     if "GITHUB_OUTPUT" in os.environ:
         with open(os.environ["GITHUB_OUTPUT"], "a") as f:
             email_body_for_action = email_body.replace("\n", "%0A")
@@ -327,6 +297,7 @@ def main():
     else:
         print("Not in GitHub Actions, skipping output.")
         
+    # Save the new state
     if newly_seen_links:
         seen_jobs.update(newly_seen_links)
         save_seen_jobs(seen_jobs)
