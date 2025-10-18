@@ -1,0 +1,51 @@
+name: Job Scraper
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+jobs:
+  scrape-and-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Install Playwright Browsers
+        run: playwright install
+
+      - name: Run Python Scraper
+        id: scraper
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scrape.py
+        
+      - name: Send email notification
+        if: steps.scraper.outputs.new_jobs_email_body
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: 'New AI-Filtered Job Openings Found!'
+          body: ${{ steps.scraper.outputs.new_jobs_email_body }}
+          to: ${{ secrets.MAIL_TO }}
+          from: GitHub Job Tracker <${{ secrets.MAIL_USERNAME }}>
+
+      - name: Commit updated seen_jobs.json
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update seen jobs list"
+          file_pattern: "seen_jobs.json"
